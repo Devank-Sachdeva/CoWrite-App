@@ -1,38 +1,15 @@
 "use client"
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Slate, Editable, withReact, RenderElementProps } from 'slate-react'
 import {
-    BaseEditor,
     Transforms,
     createEditor,
-    Node,
-    Element as SlateElement,
     Descendant,
-    Editor,
 } from 'slate'
-import { ReactEditor } from 'slate-react'
-
-
-type CustomElement = TitleElement | ParagraphElement
-type ParagraphElement = {
-    type: 'paragraph'
-    align?: string
-    children: Descendant[]
-}
-
-type TitleElement = { type: 'title'; children: Descendant[] }
-type CustomText = { text: string }
-
-declare module 'slate' {
-    interface CustomTypes {
-        Editor: BaseEditor & ReactEditor
-        Element: CustomElement
-        Text: CustomText
-    }
-}
-
-type ElementType = "title" | "paragraph" | undefined
+import { useRecoilValue } from 'recoil'
+import { socketAtom } from '@/store/socket'
+import { withLayout } from './slate-layout'
 
 const initialValue: Descendant[] = [
     {
@@ -45,88 +22,56 @@ const initialValue: Descendant[] = [
             {
                 text: 'This example shows how to enforce your layout with domain-specific constraints. This document will always have a title block at the top and at least one paragraph in the body. Try deleting them and see what happens!',
             },
+            {
+                text: 'This example shows how to enforce your layout with domain-specific constraints. This document will always have a title block at the top and at least one paragraph in the body. Try deleting them and see what happens!',
+            },
         ],
     },
 ]
 
 export const  Component = () => {
     const renderElement = useCallback((props: RenderElementProps) => <Element {...props} />, [])
+    const [data, setData] = useState<String>("");
+    const socket = useRecoilValue(socketAtom);
 
     const editor = useMemo(
         () => withLayout(withReact(createEditor())),
         []
     )
+    const appendToEditor =  useCallback((string: string) => {
+        console.log("adding " + string)
+        Transforms.insertText(editor, string);
+    },[editor])
+    
+    useEffect(()=> {
+        if (socket != null) socket.onmessage = (message) => appendToEditor(message.data)
+    },[appendToEditor,socket])
+    useEffect(()=> {
+        if (socket?.readyState == WebSocket.OPEN){
+            socket?.send(data != null ? data.toString() : "");
+        }
+    },[socket, data])
+
+
     return <Slate editor={editor} initialValue={initialValue} > 
         <Editable
             renderElement={renderElement}
             placeholder="Enter a title…"
             spellCheck
             autoFocus
+            onDOMBeforeInput= {(event) => {
+                setData(event.data!)
+            }}
+
         />
     </Slate>
 
 }
 
-const withLayout = (editor : Editor) => {
-    const { normalizeNode } = editor
-    editor.normalizeNode = ([node, path]) => {
-        if (path.length === 0) {
-            if (editor.children.length <= 1 && Editor.string(editor, [0, 0]) === '') {
-                const title: TitleElement = {
-                    type: 'title',
-                    children: [{ text: 'Untitled' }],
-                }
-                Transforms.insertNodes(editor, title, {
-                    at: path.concat(0),
-                    select: true,
-                })
-            }
-
-            if (editor.children.length < 2) {
-                const paragraph: ParagraphElement = {
-                    type: 'paragraph',
-                    children: [{ text: '' }],
-                }
-                Transforms.insertNodes(editor, paragraph, { at: path.concat(1) })
-            }
-            
-            for (const [child, childPath] of Node.children(editor, path)) {
-                let type: ElementType
-                const slateIndex = childPath[0]
-                const enforceType = ( type : ElementType ) => {
-                    if (SlateElement.isElement(child) && child.type !== type) {
-                        const newProperties: Partial<SlateElement> = { type }
-                        Transforms.setNodes<SlateElement>(editor, newProperties, {
-                            at: childPath,
-                        })
-                    }
-                }
-
-                switch (slateIndex) {
-                    case 0:
-                        type = 'title'
-                        enforceType(type as ElementType)
-                        break
-                    case 1:
-                        type = 'paragraph'
-                        enforceType(type as ElementType)
-                    default:
-                        break
-                }
-            }
-        }
-
-        return normalizeNode([node, path])
-    }
-
-    return editor
-}
-
-
 const Element = ({ attributes, children, element } : RenderElementProps) => {
     switch (element.type) {
         case 'title':
-            return <div className='text-3xl focus:border-none' {...attributes}>{children}</div>
+            return <div className='text-3xl pb-5' {...attributes}>{children}</div>
         case 'paragraph':
             return <p {...attributes}>{children}</p>
     }
